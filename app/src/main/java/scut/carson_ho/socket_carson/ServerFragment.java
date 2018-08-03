@@ -110,16 +110,33 @@ public class ServerFragment extends Fragment {
                         sb.append(line);
                     }
                     String receive = sb.toString();*/
-
+                    /*byte[] data = null;
                     if (socket.isConnected()) {
                         byte[] data = new byte[bis.available()];
-                        while (bis.read(data) != -1) {
-                            String msg = new String(data);
+                        int length;
+                        while ((length = bis.read(data)) != -1) {
+                            String msg = new String(data, 0 , length);
                             Log.d(TAG, "socket received: " + msg);
                             mMainHandler.obtainMessage(0, msg).sendToTarget();
                         }
+                    }*/
+                    byte[] data = null;
+                    if (socket.isConnected()) {
+                        try {
+                            //bis = new BufferedInputStream(socket.getInputStream());
+                            data = new byte[bis.available()];
+                            bis.read(data);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    } else {
+                        data = new byte[1];
                     }
-
+                    if (data.length > 1) {
+                        String msg = new String(data);
+                        Log.d(TAG, "socket received: " + msg);
+                        mMainHandler.obtainMessage(0, msg).sendToTarget();
+                    }
                     //pw.println("Your message has been received successfully！.");
                     //pw.close();
                     //br.close();
