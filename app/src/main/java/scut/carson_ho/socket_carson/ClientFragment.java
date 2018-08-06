@@ -14,12 +14,9 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.PrintStream;
+import java.io.UnsupportedEncodingException;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +25,8 @@ import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
 import butterknife.Unbinder;
+import scut.carson_ho.socket_carson.service.SocketService;
+import scut.carson_ho.socket_carson.service.TcpService;
 
 public class ClientFragment extends Fragment {
 
@@ -45,14 +44,14 @@ public class ClientFragment extends Fragment {
     Button send;
     @BindView(R.id.receive_message)
     TextView receiveMessage;
-    @BindView(R.id.receive)
-    Button receive;
     Unbinder unbinder;
 
     private Handler mMainHandler;
-    private Socket socket;
     private ExecutorService mThreadPool;
     private OutputStream outputStream;
+    private ServerSocket mServerSocket;
+    private SocketService mSocketService;
+    private Socket socket;
     private boolean isRun;
 
 
@@ -73,6 +72,12 @@ public class ClientFragment extends Fragment {
                 }
             }
         };
+        mSocketService = new TcpService(getContext());
+        mSocketService.setReceiveMessageListener(message -> {
+            Log.d(TAG, "setReceiveMessageListener: " + message);
+            getActivity().runOnUiThread(() -> receiveMessage.setText(message));
+            //receiveMessage::setText
+        });
         return rootView;
     }
 
@@ -84,7 +89,7 @@ public class ClientFragment extends Fragment {
 
     @OnClick(R.id.connect)
     public void onConnectClicked() {
-        mThreadPool.execute(new Runnable() {
+        /*mThreadPool.execute(new Runnable() {
             BufferedInputStream bufferedInputStream;
 
             public byte[] receiveData() {
@@ -114,14 +119,14 @@ public class ClientFragment extends Fragment {
                     outputStream = socket.getOutputStream();
                     PrintStream out = new PrintStream(socket.getOutputStream(), true, "gbk");
                     while (isRun) {
-                        /*BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "utf-8"));
+                        *//*BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "utf-8"));
                         String line;
                         StringBuilder sb = new StringBuilder();
                         while ((line = br.readLine()) != null) {
                             sb.append(line);
                         }
                         Log.d(TAG, "onConnectClicked: " + br.readLine());
-                        mMainHandler.obtainMessage(0, sb.toString()).sendToTarget();*/
+                        mMainHandler.obtainMessage(0, sb.toString()).sendToTarget();*//*
                         byte[] data = receiveData();
                         if (data.length > 1) {
                             System.out.println(new String(data));
@@ -133,12 +138,13 @@ public class ClientFragment extends Fragment {
                     Log.d(TAG, "onConnectClicked: error" + e.getMessage());
                 }
             }
-        });
+        });*/
+        mSocketService.connect(ip.getText().toString(), PORT);
     }
 
     @OnClick(R.id.disconnect)
     public void onDisconnectClicked() {
-        try {
+/*        try {
             // 断开 客户端发送到服务器 的连接，即关闭输出流对象OutputStream
             if (outputStream != null) {
                 outputStream.close();
@@ -155,13 +161,13 @@ public class ClientFragment extends Fragment {
 
         } catch (Exception e) {
             e.printStackTrace();
-        }
+        }*/
+        mSocketService.stop();
     }
 
     @OnClick(R.id.send)
     public void onSendClicked() {
-        Log.d(TAG, "onSendClicked: ");
-        mThreadPool.execute(() -> {
+/*        mThreadPool.execute(() -> {
             try {
                 outputStream = socket.getOutputStream();
                 if (outputStream != null) {
@@ -174,10 +180,15 @@ public class ClientFragment extends Fragment {
                 Log.d(TAG, "onSendClicked: " + e.getMessage());
             }
 
-        });
+        });*/
+        try {
+            mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"));
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
     }
 
-    @OnClick(R.id.receive)
+/*    @OnClick(R.id.receive)
     public void onReceiveClicked() {
         mThreadPool.execute(() -> {
 
@@ -194,5 +205,5 @@ public class ClientFragment extends Fragment {
             }
 
         });
-    }
+    }*/
 }

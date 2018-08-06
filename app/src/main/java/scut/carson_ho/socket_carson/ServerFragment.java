@@ -14,16 +14,10 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.Buffer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,6 +25,8 @@ import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
 import butterknife.Unbinder;
+import scut.carson_ho.socket_carson.service.SocketService;
+import scut.carson_ho.socket_carson.service.TcpService;
 
 public class ServerFragment extends Fragment {
 
@@ -55,6 +51,7 @@ public class ServerFragment extends Fragment {
     private ExecutorService mThreadPool;
     private OutputStream outputStream;
     private ServerSocket mServerSocket;
+    private SocketService mSocketService;
     private Socket socket;
     private boolean isRun;
 
@@ -76,6 +73,12 @@ public class ServerFragment extends Fragment {
                 }
             }
         };
+        mSocketService = new TcpService(getContext());
+        mSocketService.setReceiveMessageListener(message -> {
+            Log.d(TAG, "setReceiveMessageListener: " + message);
+            getActivity().runOnUiThread(() -> receiveMessage.setText(message));
+            //receiveMessage::setText
+        });
         return root;
     }
 
@@ -87,7 +90,8 @@ public class ServerFragment extends Fragment {
 
     @OnClick(R.id.server)
     public void onServerClicked() {
-        mThreadPool.execute(() -> {
+        mSocketService.start();
+        /*mThreadPool.execute(() -> {
             isRun = true;
             try {
                 Log.d(TAG, "server client start.");
@@ -101,7 +105,7 @@ public class ServerFragment extends Fragment {
                 BufferedInputStream bis = new BufferedInputStream(socket.getInputStream());
 
                 while (isRun) {
-                    /*BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "utf-8"));
+                    *//*BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "utf-8"));
                     Log.d(TAG, "103");
                     //PrintWriter pw = new PrintWriter(socket.getOutputStream(), false);
                     StringBuilder sb = new StringBuilder();
@@ -109,8 +113,8 @@ public class ServerFragment extends Fragment {
                     while ((line = br.readLine()) != null) {
                         sb.append(line);
                     }
-                    String receive = sb.toString();*/
-                    /*byte[] data = null;
+                    String receive = sb.toString();*//*
+                    *//*byte[] data = null;
                     if (socket.isConnected()) {
                         byte[] data = new byte[bis.available()];
                         int length;
@@ -119,7 +123,7 @@ public class ServerFragment extends Fragment {
                             Log.d(TAG, "socket received: " + msg);
                             mMainHandler.obtainMessage(0, msg).sendToTarget();
                         }
-                    }*/
+                    }*//*
                     byte[] data = null;
                     if (socket.isConnected()) {
                         try {
@@ -161,12 +165,12 @@ public class ServerFragment extends Fragment {
                 }
                 //handler.obtainMessage(10, (Object) "接受 完成").sendToTarget();
             }
-        });
+        });*/
     }
 
     @OnClick(R.id.send)
     public void onSendClicked() {
-        mThreadPool.execute(() -> {
+        /*mThreadPool.execute(() -> {
             try {
                 outputStream = socket.getOutputStream();
                 if (outputStream != null) {
@@ -177,35 +181,22 @@ public class ServerFragment extends Fragment {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        });
-    }
-
-    @OnClick(R.id.receive)
-    public void onReceiveClicked() {
-        mThreadPool.execute(() -> {
-            try {
-                BufferedReader br = new BufferedReader(new InputStreamReader(socket.getInputStream(), "utf-8"));
-                String line;
-                StringBuilder sb = new StringBuilder();
-                while ((line = br.readLine()) != null) {
-                    sb.append(line);
-                }
-                Log.d(TAG, "onReceiveClicked: " + sb.toString());
-                mMainHandler.obtainMessage(0, sb.toString()).sendToTarget();
-                br.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        });
+        });*/
+        try {
+            mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"));
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
     }
 
     @OnClick(R.id.stop)
-    public void onViewClicked() {
-        try {
+    public void onStopedClicked() {
+        /*try {
             mServerSocket.close();
         } catch (IOException e) {
             e.printStackTrace();
         }
-        isRun = false;
+        isRun = false;*/
+        mSocketService.stop();
     }
 }

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package scut.carson_ho.socket_carson;
+package scut.carson_ho.socket_carson.service;
 
 import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
@@ -28,6 +28,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import scut.carson_ho.socket_carson.Constants;
 
 /**
  * This class does all the work for setting up and managing Bluetooth
@@ -35,9 +39,9 @@ import java.net.Socket;
  * incoming connections, a thread for connecting with a device, and a
  * thread for performing data transmissions when connected.
  */
-public class SocketService {
+public class TcpService implements SocketService {
     // Debugging
-    private static final String TAG = "SocketService";
+    private static final String TAG = "TcpService";
 
     // Member fields
     private final BluetoothAdapter mAdapter;
@@ -55,17 +59,20 @@ public class SocketService {
     public static final int STATE_CONNECTING = 2; // now initiating an outgoing connection
     public static final int STATE_CONNECTED = 3;  // now connected to a remote device
 
+    private ExecutorService mThreadPool;
+
     /**
      * Constructor. Prepares a new BluetoothChat session.
      *
      * @param context The UI Activity Context
      * @param handler A Handler to send messages back to the UI Activity
      */
-    public SocketService(Context context, Handler handler) {
+    public TcpService(Context context, Handler handler) {
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = handler;
+        mThreadPool = Executors.newCachedThreadPool();
     }
 
     /**
@@ -73,11 +80,12 @@ public class SocketService {
      *
      * @param context The UI Activity Context
      */
-    public SocketService(Context context) {
+    public TcpService(Context context) {
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = new Handler();
+        mThreadPool = Executors.newCachedThreadPool();
     }
 
     /**
@@ -246,7 +254,7 @@ public class SocketService {
         updateUserInterfaceTitle();
 
         // Start the service over to restart listening mode
-        SocketService.this.start();
+        TcpService.this.start();
     }
 
     /**
@@ -265,7 +273,7 @@ public class SocketService {
         updateUserInterfaceTitle();
 
         // Start the service over to restart listening mode
-        SocketService.this.start();
+        TcpService.this.start();
     }
 
     /**
@@ -290,14 +298,9 @@ public class SocketService {
             setName("AcceptThread");
 
             Log.d(TAG, "server client start.");
+
             try {
                 mmServerSocket = new ServerSocket(PORT);
-                mmSocket = mmServerSocket.accept();
-                Log.d(TAG, "server client run.");
-                String remoteIP = mmSocket.getInetAddress().getHostAddress();
-                int remotePort = mmSocket.getLocalPort();
-                Log.d(TAG, "A client connected. IP:" + remoteIP + ", Port: " + remotePort);
-                Log.d(TAG, "\"server: receiving.............\"");
             } catch (IOException e) {
                 Log.e(TAG, "AcceptThread failed", e);
                 e.printStackTrace();
@@ -305,9 +308,20 @@ public class SocketService {
             mState = STATE_LISTEN;
             // Listen to the server socket if we're not connected
             while (mState != STATE_CONNECTED) {
+                try {
+                    mmSocket = mmServerSocket.accept();
+                    Log.d(TAG, "server client run.");
+                    String remoteIP = mmSocket.getInetAddress().getHostAddress();
+                    int remotePort = mmSocket.getLocalPort();
+                    Log.d(TAG, "A client connected. IP:" + remoteIP + ", Port: " + remotePort);
+                    Log.d(TAG, "\"server: receiving.............\"");
+                } catch (IOException e) {
+                    Log.e(TAG, "accept() failed", e);
+                    break;
+                }
                 // If a connection was accepted
-                if (mmSocket != null) {
-                    synchronized (SocketService.this) {
+                if (mmSocket != null && mmSocket.isConnected()) {
+                    synchronized (TcpService.this) {
                         switch (mState) {
                             case STATE_LISTEN:
                             case STATE_CONNECTING:
@@ -328,11 +342,10 @@ public class SocketService {
                 }
             }
             Log.i(TAG, "END AcceptThread");
-
         }
 
         public void cancel() {
-            Log.d(TAG, "AcceptThread cancel " + this);
+            Log.d(TAG, "AcceptThread cancel: " + Thread.currentThread());
             try {
                 mmServerSocket.close();
             } catch (IOException e) {
@@ -367,7 +380,7 @@ public class SocketService {
                 Log.e(TAG, "ConnectThread create() failed", e);
                 try {
                     mmSocket.close();
-                } catch (IOException e2) {
+                } catch (Exception e2) {
                     Log.e(TAG, "unable to close() socket during connection failure", e2);
                 }
                 connectionFailed();
@@ -376,7 +389,7 @@ public class SocketService {
             mState = STATE_CONNECTING;
 
             // Reset the ConnectThread because we're done
-            synchronized (SocketService.this) {
+            synchronized (TcpService.this) {
                 mConnectThread = null;
             }
 
@@ -387,7 +400,7 @@ public class SocketService {
         public void cancel() {
             try {
                 mmSocket.close();
-            } catch (IOException e) {
+            } catch (Exception e) {
                 Log.e(TAG, "close() of connect socket failed", e);
             }
         }
@@ -403,7 +416,7 @@ public class SocketService {
         private final OutputStream mmOutStream;
 
         public ConnectedThread(Socket socket) {
-            Log.d(TAG, "create ConnectedThread");
+            Log.d(TAG, "create ConnectedThread: " + Thread.currentThread());
             mmSocket = socket;
             InputStream tmpIn = null;
             OutputStream tmpOut = null;
@@ -417,23 +430,33 @@ public class SocketService {
 
             mmInStream = tmpIn;
             mmOutStream = tmpOut;
+            mState = STATE_CONNECTED;
         }
 
+        @Override
         public void run() {
-            Log.i(TAG, "BEGIN mConnectedThread");
-            byte[] buffer = new byte[1024];
-            int bytes;
+            Log.i(TAG, "BEGIN mConnectedThread: " + Thread.currentThread());
 
             // Keep listening to the InputStream while connected
             while (mState == STATE_CONNECTED) {
                 try {
                     // Read from the InputStream
-                    bytes = mmInStream.read(buffer);
-                    mReceiveMessageListener.onReceived(new String(buffer, 0, bytes));
+                    byte[] buffer = new byte[mmInStream.available()];
+                    int bytes = mmInStream.read(buffer);
+                    if (bytes > 1) {
+                        Log.d(TAG, "Connected thread received: " + new String(buffer, 0, bytes));
+                        mReceiveMessageListener.onReceived(new String(buffer, 0, bytes));
+                    }
                 } catch (IOException e) {
                     Log.e(TAG, "disconnected", e);
                     connectionLost();
                     break;
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
                 }
             }
         }
@@ -444,12 +467,15 @@ public class SocketService {
          * @param buffer The bytes to write
          */
         public void write(byte[] buffer) {
-            try {
-                mmOutStream.write(buffer);
-                Log.d(TAG, "bluetooth write: " + new String(buffer));
-            } catch (IOException e) {
-                Log.e(TAG, "Exception during write", e);
-            }
+            mThreadPool.execute(() -> {
+                Log.d(TAG, "write: " + Thread.currentThread());
+                try {
+                    mmOutStream.write(buffer);
+                    Log.d(TAG, "bluetooth write: " + new String(buffer));
+                } catch (IOException e) {
+                    Log.e(TAG, "Exception during write", e);
+                }
+            });
         }
 
         public void cancel() {
@@ -462,10 +488,6 @@ public class SocketService {
     }
 
     private ReceiveMessageListener mReceiveMessageListener;
-
-    public interface ReceiveMessageListener {
-        void onReceived(String message);
-    }
 
     public void setReceiveMessageListener(ReceiveMessageListener receiveMessageListener) {
         mReceiveMessageListener = receiveMessageListener;
