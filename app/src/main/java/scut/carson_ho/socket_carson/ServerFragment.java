@@ -27,6 +27,7 @@ import butterknife.OnClick;
 import butterknife.Unbinder;
 import scut.carson_ho.socket_carson.service.SocketService;
 import scut.carson_ho.socket_carson.service.TcpService;
+import scut.carson_ho.socket_carson.service.UdpService;
 
 public class ServerFragment extends Fragment {
 
@@ -48,13 +49,7 @@ public class ServerFragment extends Fragment {
     Button stop;
 
     private Handler mMainHandler;
-    private ExecutorService mThreadPool;
-    private OutputStream outputStream;
-    private ServerSocket mServerSocket;
     private SocketService mSocketService;
-    private Socket socket;
-    private boolean isRun;
-
 
     @SuppressLint("HandlerLeak")
     @Nullable
@@ -62,7 +57,6 @@ public class ServerFragment extends Fragment {
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, Bundle savedInstanceState) {
         View root = inflater.inflate(R.layout.server_fragment, container, false);
         unbinder = ButterKnife.bind(this, root);
-        mThreadPool = Executors.newCachedThreadPool();
         mMainHandler = new Handler() {
             @Override
             public void handleMessage(Message msg) {
@@ -73,7 +67,7 @@ public class ServerFragment extends Fragment {
                 }
             }
         };
-        mSocketService = new TcpService(getContext());
+        mSocketService = new UdpService(getContext());
         mSocketService.setReceiveMessageListener(message -> {
             Log.d(TAG, "setReceiveMessageListener: " + message);
             getActivity().runOnUiThread(() -> receiveMessage.setText(message));
@@ -183,7 +177,7 @@ public class ServerFragment extends Fragment {
             }
         });*/
         try {
-            mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"));
+            mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"), null);
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }

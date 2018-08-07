@@ -16,18 +16,22 @@
 
 package scut.carson_ho.socket_carson.service;
 
-import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.ServerSocket;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.MulticastSocket;
 import java.net.Socket;
+import java.net.UnknownHostException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -39,27 +43,27 @@ import scut.carson_ho.socket_carson.Constants;
  * incoming connections, a thread for connecting with a device, and a
  * thread for performing data transmissions when connected.
  */
-public class UdpService implements SocketService{
+public class UdpService implements SocketService {
     // Debugging
     private static final String TAG = "UdpService";
 
+    // indicate the current connection state
+    private final int STATE_NONE = 0;       // we're doing nothing
+    private final int STATE_LISTEN = 1;     // now listening for incoming connections
+
+    private final int TTLTIME = 100;
+    private final String MULTICAST_ADDR = "255.255.255.255";
+
     // Member fields
-    private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
     private AcceptThread mAcceptThread;
-    private ConnectThread mConnectThread;
-    private ConnectedThread mConnectedThread;
-
+    private SendThread mSendThread;
+    private MultiAcceptThread mMultiAcceptThread;
+    private MultiSendThread mMultiSendThread;
     private int mState;
     private int mNewState;
-
-    // Constants that indicate the current connection state
-    public static final int STATE_NONE = 0;       // we're doing nothing
-    public static final int STATE_LISTEN = 1;     // now listening for incoming connections
-    public static final int STATE_CONNECTING = 2; // now initiating an outgoing connection
-    public static final int STATE_CONNECTED = 3;  // now connected to a remote device
-
     private ExecutorService mThreadPool;
+    private ReceiveMessageListener mReceiveMessageListener;
 
     /**
      * Constructor. Prepares a new BluetoothChat session.
@@ -68,7 +72,6 @@ public class UdpService implements SocketService{
      * @param handler A Handler to send messages back to the UI Activity
      */
     public UdpService(Context context, Handler handler) {
-        mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = handler;
@@ -81,11 +84,15 @@ public class UdpService implements SocketService{
      * @param context The UI Activity Context
      */
     public UdpService(Context context) {
-        mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = new Handler();
         mThreadPool = Executors.newCachedThreadPool();
+    }
+
+    @Override
+    public void setReceiveMessageListener(ReceiveMessageListener receiveMessageListener) {
+        mReceiveMessageListener = receiveMessageListener;
     }
 
     /**
@@ -103,6 +110,7 @@ public class UdpService implements SocketService{
     /**
      * Return the current connection state.
      */
+    @Override
     public synchronized int getState() {
         return mState;
     }
@@ -111,108 +119,63 @@ public class UdpService implements SocketService{
      * Start the chat service. Specifically start AcceptThread to begin a
      * session in listening (server) mode. Called by the Activity onResume()
      */
+    @Override
     public synchronized void start() {
         Log.d(TAG, "start");
 
         // Cancel any thread attempting to make a connection
-        if (mConnectThread != null) {
-            mConnectThread.cancel();
-            mConnectThread = null;
+        if (mSendThread != null) {
+            mSendThread.cancel();
+            mSendThread = null;
         }
 
-        // Cancel any thread currently running a connection
-        if (mConnectedThread != null) {
-            mConnectedThread.cancel();
-            mConnectedThread = null;
+        // Cancel any thread attempting to make a connection
+        if (mMultiSendThread != null) {
+            mMultiSendThread.cancel();
+            mMultiSendThread = null;
         }
 
         // Start the thread to listen on a BluetoothServerSocket
-        if (mAcceptThread == null) {
+/*        if (mAcceptThread == null) {
             mAcceptThread = new AcceptThread();
-            mAcceptThread.start();
+            mThreadPool.execute(mAcceptThread);
+        }*/
+
+        // Start the thread to listen on a BluetoothServerSocket
+        if (mMultiAcceptThread == null) {
+            mMultiAcceptThread = new MultiAcceptThread();
+            mThreadPool.execute(mMultiAcceptThread);
         }
         // Update UI title
         updateUserInterfaceTitle();
     }
 
+    @Override
     public synchronized void connect(String ip, int port) {
-        Log.d(TAG, "connect to: " + ip + ":" + port);
-
-        // Cancel any thread attempting to make a connection
-        if (mState == STATE_CONNECTING) {
-            if (mConnectThread != null) {
-                mConnectThread.cancel();
-                mConnectThread = null;
-            }
-        }
-
-        // Cancel any thread currently running a connection
-        if (mConnectedThread != null) {
-            mConnectedThread.cancel();
-            mConnectedThread = null;
-        }
-
-        // Start the thread to connect with the given device
-        mConnectThread = new ConnectThread(ip, port);
-        mConnectThread.start();
-        // Update UI title
-        updateUserInterfaceTitle();
-    }
-
-    private synchronized void connected(Socket socket) {
-        Log.d(TAG, "connected");
-
-        // Cancel the thread that completed the connection
-        if (mConnectThread != null) {
-            mConnectThread.cancel();
-            mConnectThread = null;
-        }
-
-        // Cancel any thread currently running a connection
-        if (mConnectedThread != null) {
-            mConnectedThread.cancel();
-            mConnectedThread = null;
-        }
-
-        // Cancel the accept thread because we only want to connect to one device
-        if (mAcceptThread != null) {
-            mAcceptThread.cancel();
-            mAcceptThread = null;
-        }
-
-        // Start the thread to manage the connection and perform transmissions
-        mConnectedThread = new ConnectedThread(socket);
-        mConnectedThread.start();
-
-        // Send the name of the connected device back to the UI Activity
-        Message msg = mHandler.obtainMessage(Constants.MESSAGE_DEVICE_NAME);
-        /*Bundle bundle = new Bundle();
-        bundle.putString(Constants.DEVICE_NAME, device.getName());
-        msg.setData(bundle);*/
-        mHandler.sendMessage(msg);
-        // Update UI title
-        updateUserInterfaceTitle();
     }
 
     /**
      * Stop all threads
      */
+    @Override
     public synchronized void stop() {
         Log.d(TAG, "stop");
 
-        if (mConnectThread != null) {
-            mConnectThread.cancel();
-            mConnectThread = null;
+        if (mSendThread != null) {
+            mSendThread.cancel();
+            mSendThread = null;
         }
-
-        if (mConnectedThread != null) {
-            mConnectedThread.cancel();
-            mConnectedThread = null;
-        }
-
         if (mAcceptThread != null) {
             mAcceptThread.cancel();
             mAcceptThread = null;
+        }
+        if (mMultiSendThread != null) {
+            mMultiSendThread.cancel();
+            mMultiSendThread = null;
+        }
+        if (mMultiAcceptThread != null) {
+            mMultiAcceptThread.cancel();
+            mMultiAcceptThread = null;
         }
 
         mState = STATE_NONE;
@@ -224,18 +187,26 @@ public class UdpService implements SocketService{
      * Write to the ConnectedThread in an unsynchronized manner
      *
      * @param out The bytes to write
-     * @see ConnectedThread#write(byte[])
+     * @see SendThread#setMessage(byte[])
      */
-    public void write(byte[] out) {
-        // Create temporary object
-        ConnectedThread r;
-        // Synchronize a copy of the ConnectedThread
+    @Override
+    public void write(byte[] out, String ip) {
         synchronized (this) {
-            if (mState != STATE_CONNECTED) return;
-            r = mConnectedThread;
+            if (mSendThread == null) {
+                mSendThread = new SendThread();
+            }
+            mThreadPool.execute(mSendThread.setMessage(out).setIp(ip));
         }
-        // Perform the write unsynchronized
-        r.write(out);
+    }
+
+    @Override
+    public void multiWrite(byte[] out) {
+        synchronized (this) {
+            if (mMultiSendThread == null) {
+                mMultiSendThread = new MultiSendThread();
+            }
+            mThreadPool.execute(mMultiSendThread.setMessage(out));
+        }
     }
 
     /**
@@ -258,98 +229,56 @@ public class UdpService implements SocketService{
     }
 
     /**
-     * Indicate that the connection was lost and notify the UI Activity.
-     */
-    private void connectionLost() {
-        // Send a failure message back to the Activity
-        Message msg = mHandler.obtainMessage(Constants.MESSAGE_TOAST);
-        Bundle bundle = new Bundle();
-        bundle.putString(Constants.TOAST, "Device connection was lost");
-        msg.setData(bundle);
-        mHandler.sendMessage(msg);
-
-        mState = STATE_NONE;
-        // Update UI title
-        updateUserInterfaceTitle();
-
-        // Start the service over to restart listening mode
-        UdpService.this.start();
-    }
-
-    /**
      * This thread runs while listening for incoming connections. It behaves
      * like a server-side client. It runs until a connection is accepted
      * (or until cancelled).
      */
-    private final int PORT = 8191;
-
-    private class AcceptThread extends Thread {
+    private class AcceptThread implements Runnable {
         // The local server socket
-        private ServerSocket mmServerSocket;
-        private Socket mmSocket;
-
-        public AcceptThread() {
-
-        }
+        DatagramSocket datagramSocket;
 
         @Override
         public void run() {
             Log.d(TAG, "BEGIN mAcceptThread" + this);
-            setName("AcceptThread");
+            //setName("AcceptThread");
 
             Log.d(TAG, "server client start.");
 
             try {
-                mmServerSocket = new ServerSocket(PORT);
+                datagramSocket = new DatagramSocket(PORT);
+                Log.d(TAG, "server client run.");
+                int remotePort = datagramSocket.getLocalPort();
+                Log.d(TAG, "receiving............." + ", Port: " + remotePort);
             } catch (IOException e) {
                 Log.e(TAG, "AcceptThread failed", e);
                 e.printStackTrace();
             }
+            byte[] data = new byte[1024];
+            DatagramPacket datagramPacket = new DatagramPacket(data, data.length);
             mState = STATE_LISTEN;
             // Listen to the server socket if we're not connected
-            while (mState != STATE_CONNECTED) {
-                try {
-                    mmSocket = mmServerSocket.accept();
-                    Log.d(TAG, "server client run.");
-                    String remoteIP = mmSocket.getInetAddress().getHostAddress();
-                    int remotePort = mmSocket.getLocalPort();
-                    Log.d(TAG, "A client connected. IP:" + remoteIP + ", Port: " + remotePort);
-                    Log.d(TAG, "\"server: receiving.............\"");
-                } catch (IOException e) {
-                    Log.e(TAG, "accept() failed", e);
-                    break;
-                }
+            while (mState == STATE_LISTEN) {
                 // If a connection was accepted
-                if (mmSocket != null && mmSocket.isConnected()) {
-                    synchronized (UdpService.this) {
-                        switch (mState) {
-                            case STATE_LISTEN:
-                            case STATE_CONNECTING:
-                                // Situation normal. Start the connected thread.
-                                connected(mmSocket);
-                                break;
-                            case STATE_NONE:
-                            case STATE_CONNECTED:
-                                // Either not ready or already connected. Terminate new socket.
-                                try {
-                                    mmSocket.close();
-                                } catch (IOException e) {
-                                    Log.e(TAG, "Could not close unwanted socket", e);
-                                }
-                                break;
-                        }
+                if (datagramSocket != null) {
+                    try {
+                        Log.d(TAG, "run: datagramSocket.receive(datagramPacket)");
+                        datagramSocket.receive(datagramPacket);
+                        mReceiveMessageListener.onReceived(new String(datagramPacket.getData()));
+                        Log.d("UDP Demo", datagramPacket.getAddress().getHostAddress()
+                                + ":" + new String(datagramPacket.getData()));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.e(TAG, "datagramSocket.receive(datagramPacket)", e);
                     }
                 }
             }
             Log.i(TAG, "END AcceptThread");
         }
 
-        public void cancel() {
+        void cancel() {
             Log.d(TAG, "AcceptThread cancel: " + Thread.currentThread());
-            try {
-                mmServerSocket.close();
-            } catch (IOException e) {
-                Log.e(TAG, "AcceptThread close() of server failed", e);
+            if (datagramSocket != null) {
+                datagramSocket.close();
             }
         }
     }
@@ -359,137 +288,172 @@ public class UdpService implements SocketService{
      * with a device. It runs straight through; the connection either
      * succeeds or fails.
      */
-    private class ConnectThread extends Thread {
-        private Socket mmSocket;
-        private String ip;
-        private int port;
+    private class SendThread implements Runnable {
 
-        public ConnectThread(String ip, int port) {
+        private DatagramSocket datagramSocket;
+        private byte[] message;
+        private String ip;
+
+        SendThread setMessage(byte[] msg) {
+            this.message = msg;
+            return this;
+        }
+
+        SendThread setIp(String ip) {
             this.ip = ip;
-            this.port = port;
+            return this;
         }
 
         @Override
         public void run() {
-            Log.i(TAG, "BEGIN mConnectThread");
-            setName("ConnectThread");
+            Log.i(TAG, "SEND mSendThread");
+            //setName("SendThread");
 
             try {
-                mmSocket = new Socket(ip, port);
+                datagramSocket = new DatagramSocket();
             } catch (IOException e) {
-                Log.e(TAG, "ConnectThread create() failed", e);
+                Log.e(TAG, "SendThread create() failed", e);
                 try {
-                    mmSocket.close();
-                } catch (IOException e2) {
+                    datagramSocket.close();
+                } catch (Exception e2) {
                     Log.e(TAG, "unable to close() socket during connection failure", e2);
                 }
                 connectionFailed();
                 return;
             }
-            mState = STATE_CONNECTING;
-
-            // Reset the ConnectThread because we're done
-            synchronized (UdpService.this) {
-                mConnectThread = null;
+            InetAddress addr = null;
+            try {
+                Log.d(TAG, "ip = " + ip);
+                addr = InetAddress.getByName(ip);
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+                Log.e(TAG, "InetAddress.getByName(ip);", e);
             }
-
-            // Start the connected thread
-            connected(mmSocket);
+            if (message != null && message.length > 0) {
+                Log.d(TAG, "send msg: " + new String(message) + ", ip: " + addr + ", port: " + PORT);
+                DatagramPacket datagramPacket = new DatagramPacket(message, message.length, addr, PORT);
+                try {
+                    datagramSocket.send(datagramPacket);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    Log.e(TAG, "datagramSocket.send(datagramPacket);", e);
+                }
+            }
         }
 
-        public void cancel() {
+        void cancel() {
             try {
-                mmSocket.close();
-            } catch (IOException e) {
+                datagramSocket.close();
+            } catch (Exception e) {
                 Log.e(TAG, "close() of connect socket failed", e);
             }
         }
     }
 
-    /**
-     * This thread runs during a connection with a remote device.
-     * It handles all incoming and outgoing transmissions.
-     */
-    private class ConnectedThread extends Thread {
-        private final Socket mmSocket;
-        private final InputStream mmInStream;
-        private final OutputStream mmOutStream;
+    private class MultiAcceptThread implements Runnable {
+        // The local server socket
+        MulticastSocket datagramSocket;
 
-        public ConnectedThread(Socket socket) {
-            Log.d(TAG, "create ConnectedThread: " + Thread.currentThread());
-            mmSocket = socket;
-            InputStream tmpIn = null;
-            OutputStream tmpOut = null;
+        @Override
+        public void run() {
+            Log.d(TAG, "BEGIN mAcceptThread" + this);
+            //setName("AcceptThread");
+
+            Log.d(TAG, "server client start.");
 
             try {
-                tmpIn = socket.getInputStream();
-                tmpOut = socket.getOutputStream();
+                datagramSocket = new MulticastSocket(PORT);
+                datagramSocket.setTimeToLive(TTLTIME);
+                datagramSocket.joinGroup(InetAddress.getByName(MULTICAST_ADDR));
+                Log.d(TAG, "server client run.");
+                int remotePort = datagramSocket.getLocalPort();
+                Log.d(TAG, "receiving............." + ", Port: " + remotePort);
             } catch (IOException e) {
-                Log.e(TAG, "temp sockets not created", e);
+                Log.e(TAG, "AcceptThread failed", e);
+                e.printStackTrace();
             }
+            byte[] data = new byte[1024];
+            DatagramPacket datagramPacket = new DatagramPacket(data, data.length);
+            mState = STATE_LISTEN;
+            // Listen to the server socket if we're not connected
+            while (mState == STATE_LISTEN) {
+                // If a connection was accepted
+                if (datagramSocket != null) {
+                    try {
+                        Log.d(TAG, "run: datagramSocket.receive(datagramPacket)");
+                        datagramSocket.receive(datagramPacket);
+                        mReceiveMessageListener.onReceived(new String(datagramPacket.getData()));
+                        Log.d("UDP Demo", datagramPacket.getAddress().getHostAddress()
+                                + ":" + new String(datagramPacket.getData()));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.e(TAG, "datagramSocket.receive(datagramPacket)", e);
+                    }
+                }
+            }
+            Log.i(TAG, "END AcceptThread");
+        }
 
-            mmInStream = tmpIn;
-            mmOutStream = tmpOut;
-            mState = STATE_CONNECTED;
+        void cancel() {
+            Log.d(TAG, "AcceptThread cancel: " + Thread.currentThread());
+            if (datagramSocket != null) {
+                datagramSocket.close();
+            }
+        }
+    }
+
+    private class MultiSendThread implements Runnable {
+
+        private MulticastSocket datagramSocket;
+        private byte[] message;
+        private String ip;
+
+        MultiSendThread setMessage(byte[] msg) {
+            this.message = msg;
+            return this;
+        }
+
+        MultiSendThread setIp(String ip) {
+            this.ip = ip;
+            return this;
         }
 
         @Override
         public void run() {
-            Log.i(TAG, "BEGIN mConnectedThread: " + Thread.currentThread());
+            Log.i(TAG, "SEND mSendThread");
+            //setName("SendThread");
 
-            // Keep listening to the InputStream while connected
-            while (mState == STATE_CONNECTED) {
+            try {
+                datagramSocket = new MulticastSocket();
+                datagramSocket.setTimeToLive(TTLTIME);
+            } catch (IOException e) {
+                Log.e(TAG, "SendThread create() failed", e);
                 try {
-                    // Read from the InputStream
-                    byte[] buffer = new byte[mmInStream.available()];
-                    int bytes = mmInStream.read(buffer);
-                    if (bytes > 1) {
-                        Log.d(TAG, "Connected thread received: " + new String(buffer, 0, bytes));
-                        mReceiveMessageListener.onReceived(new String(buffer, 0, bytes));
-                    }
-                } catch (IOException e) {
-                    Log.e(TAG, "disconnected", e);
-                    connectionLost();
-                    break;
+                    datagramSocket.close();
+                } catch (Exception e2) {
+                    Log.e(TAG, "unable to close() socket during connection failure", e2);
                 }
+                connectionFailed();
+                return;
+            }
+            if (message != null && message.length > 0) {
+                Log.d(TAG, "send msg: " + new String(message) + ", ip: " + MULTICAST_ADDR + ", port: " + PORT);
                 try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    // TODO Auto-generated catch block
+                    DatagramPacket datagramPacket = new DatagramPacket(message, message.length, InetAddress.getByName(MULTICAST_ADDR), PORT);
+                    datagramSocket.send(datagramPacket);
+                } catch (IOException e) {
                     e.printStackTrace();
+                    Log.e(TAG, "datagramSocket.send(datagramPacket);", e);
                 }
             }
         }
 
-        /**
-         * Write to the connected OutStream.
-         *
-         * @param buffer The bytes to write
-         */
-        public void write(byte[] buffer) {
-            mThreadPool.execute(() -> {
-                Log.d(TAG, "write: " + Thread.currentThread());
-                try {
-                    mmOutStream.write(buffer);
-                    Log.d(TAG, "bluetooth write: " + new String(buffer));
-                } catch (IOException e) {
-                    Log.e(TAG, "Exception during write", e);
-                }
-            });
-        }
-
-        public void cancel() {
+        void cancel() {
             try {
-                mmSocket.close();
-            } catch (IOException e) {
+                datagramSocket.close();
+            } catch (Exception e) {
                 Log.e(TAG, "close() of connect socket failed", e);
             }
         }
-    }
-
-    private ReceiveMessageListener mReceiveMessageListener;
-
-    public void setReceiveMessageListener(ReceiveMessageListener receiveMessageListener) {
-        mReceiveMessageListener = receiveMessageListener;
     }
 }

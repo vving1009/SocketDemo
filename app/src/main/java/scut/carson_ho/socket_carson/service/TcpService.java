@@ -16,7 +16,6 @@
 
 package scut.carson_ho.socket_carson.service;
 
-import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
@@ -43,8 +42,13 @@ public class TcpService implements SocketService {
     // Debugging
     private static final String TAG = "TcpService";
 
+    // indicate the current connection state
+    private final int STATE_NONE = 0;       // we're doing nothing
+    private final int STATE_LISTEN = 1;     // now listening for incoming connections
+    private final int STATE_CONNECTING = 2; // now initiating an outgoing connection
+    private final int STATE_CONNECTED = 3;  // now connected to a remote device
+
     // Member fields
-    private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
     private AcceptThread mAcceptThread;
     private ConnectThread mConnectThread;
@@ -52,14 +56,8 @@ public class TcpService implements SocketService {
 
     private int mState;
     private int mNewState;
-
-    // Constants that indicate the current connection state
-    public static final int STATE_NONE = 0;       // we're doing nothing
-    public static final int STATE_LISTEN = 1;     // now listening for incoming connections
-    public static final int STATE_CONNECTING = 2; // now initiating an outgoing connection
-    public static final int STATE_CONNECTED = 3;  // now connected to a remote device
-
     private ExecutorService mThreadPool;
+    private ReceiveMessageListener mReceiveMessageListener;
 
     /**
      * Constructor. Prepares a new BluetoothChat session.
@@ -68,7 +66,6 @@ public class TcpService implements SocketService {
      * @param handler A Handler to send messages back to the UI Activity
      */
     public TcpService(Context context, Handler handler) {
-        mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = handler;
@@ -81,11 +78,15 @@ public class TcpService implements SocketService {
      * @param context The UI Activity Context
      */
     public TcpService(Context context) {
-        mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
         mHandler = new Handler();
         mThreadPool = Executors.newCachedThreadPool();
+    }
+
+    @Override
+    public void setReceiveMessageListener(ReceiveMessageListener receiveMessageListener) {
+        mReceiveMessageListener = receiveMessageListener;
     }
 
     /**
@@ -103,6 +104,7 @@ public class TcpService implements SocketService {
     /**
      * Return the current connection state.
      */
+    @Override
     public synchronized int getState() {
         return mState;
     }
@@ -111,6 +113,7 @@ public class TcpService implements SocketService {
      * Start the chat service. Specifically start AcceptThread to begin a
      * session in listening (server) mode. Called by the Activity onResume()
      */
+    @Override
     public synchronized void start() {
         Log.d(TAG, "start");
 
@@ -135,6 +138,7 @@ public class TcpService implements SocketService {
         updateUserInterfaceTitle();
     }
 
+    @Override
     public synchronized void connect(String ip, int port) {
         Log.d(TAG, "connect to: " + ip + ":" + port);
 
@@ -197,6 +201,7 @@ public class TcpService implements SocketService {
     /**
      * Stop all threads
      */
+    @Override
     public synchronized void stop() {
         Log.d(TAG, "stop");
 
@@ -226,7 +231,8 @@ public class TcpService implements SocketService {
      * @param out The bytes to write
      * @see ConnectedThread#write(byte[])
      */
-    public void write(byte[] out) {
+    @Override
+    public void write(byte[] out, String ip) {
         // Create temporary object
         ConnectedThread r;
         // Synchronize a copy of the ConnectedThread
@@ -236,6 +242,11 @@ public class TcpService implements SocketService {
         }
         // Perform the write unsynchronized
         r.write(out);
+    }
+
+    @Override
+    public void multiWrite(byte[] out) {
+
     }
 
     /**
@@ -281,8 +292,6 @@ public class TcpService implements SocketService {
      * like a server-side client. It runs until a connection is accepted
      * (or until cancelled).
      */
-    private final int PORT = 8191;
-
     private class AcceptThread extends Thread {
         // The local server socket
         private ServerSocket mmServerSocket;
@@ -372,12 +381,12 @@ public class TcpService implements SocketService {
         @Override
         public void run() {
             Log.i(TAG, "BEGIN mConnectThread");
-            setName("ConnectThread");
+            setName("SendThread");
 
             try {
                 mmSocket = new Socket(ip, port);
             } catch (IOException e) {
-                Log.e(TAG, "ConnectThread create() failed", e);
+                Log.e(TAG, "SendThread create() failed", e);
                 try {
                     mmSocket.close();
                 } catch (Exception e2) {
@@ -388,7 +397,7 @@ public class TcpService implements SocketService {
             }
             mState = STATE_CONNECTING;
 
-            // Reset the ConnectThread because we're done
+            // Reset the SendThread because we're done
             synchronized (TcpService.this) {
                 mConnectThread = null;
             }
@@ -485,11 +494,5 @@ public class TcpService implements SocketService {
                 Log.e(TAG, "close() of connect socket failed", e);
             }
         }
-    }
-
-    private ReceiveMessageListener mReceiveMessageListener;
-
-    public void setReceiveMessageListener(ReceiveMessageListener receiveMessageListener) {
-        mReceiveMessageListener = receiveMessageListener;
     }
 }

@@ -34,5 +34,7 @@ public interface SocketService {
      * @param out The bytes to write
      * @see TcpService.ConnectedThread#write(byte[])
      */
-    void write(byte[] out);
+    void write(byte[] out, String ip);
+
+    void multiWrite(byte[] out);
 }

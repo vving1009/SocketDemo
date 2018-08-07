@@ -27,6 +27,7 @@ import butterknife.OnClick;
 import butterknife.Unbinder;
 import scut.carson_ho.socket_carson.service.SocketService;
 import scut.carson_ho.socket_carson.service.TcpService;
+import scut.carson_ho.socket_carson.service.UdpService;
 
 public class ClientFragment extends Fragment {
 
@@ -47,12 +48,7 @@ public class ClientFragment extends Fragment {
     Unbinder unbinder;
 
     private Handler mMainHandler;
-    private ExecutorService mThreadPool;
-    private OutputStream outputStream;
-    private ServerSocket mServerSocket;
     private SocketService mSocketService;
-    private Socket socket;
-    private boolean isRun;
 
 
     @SuppressLint("HandlerLeak")
@@ -61,7 +57,6 @@ public class ClientFragment extends Fragment {
     public View onCreateView(LayoutInflater inflater, @Nullable ViewGroup container, Bundle savedInstanceState) {
         View rootView = inflater.inflate(R.layout.client_fragment, container, false);
         unbinder = ButterKnife.bind(this, rootView);
-        mThreadPool = Executors.newCachedThreadPool();
         mMainHandler = new Handler() {
             @Override
             public void handleMessage(Message msg) {
@@ -72,7 +67,7 @@ public class ClientFragment extends Fragment {
                 }
             }
         };
-        mSocketService = new TcpService(getContext());
+        mSocketService = new UdpService(getContext());
         mSocketService.setReceiveMessageListener(message -> {
             Log.d(TAG, "setReceiveMessageListener: " + message);
             getActivity().runOnUiThread(() -> receiveMessage.setText(message));
@@ -139,7 +134,8 @@ public class ClientFragment extends Fragment {
                 }
             }
         });*/
-        mSocketService.connect(ip.getText().toString(), PORT);
+        //mSocketService.connect(ip.getText().toString(), PORT);
+        mSocketService.start();
     }
 
     @OnClick(R.id.disconnect)
@@ -182,7 +178,9 @@ public class ClientFragment extends Fragment {
 
         });*/
         try {
-            mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"));
+            //mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"), null);
+            //mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"), ip.getText().toString());
+            mSocketService.multiWrite((edit.getText().toString() + "\n").getBytes("utf-8"));
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
