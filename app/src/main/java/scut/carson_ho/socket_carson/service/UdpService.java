@@ -263,9 +263,10 @@ public class UdpService implements SocketService {
                     try {
                         Log.d(TAG, "run: datagramSocket.receive(datagramPacket)");
                         datagramSocket.receive(datagramPacket);
-                        mReceiveMessageListener.onReceived(new String(datagramPacket.getData()));
+                        String msg = new String(datagramPacket.getData(), 0, datagramPacket.getLength());
+                        mReceiveMessageListener.onReceived(msg);
                         Log.d("UDP Demo", datagramPacket.getAddress().getHostAddress()
-                                + ":" + new String(datagramPacket.getData()));
+                                + ":" + msg);
                     } catch (IOException e) {
                         e.printStackTrace();
                         Log.e(TAG, "datagramSocket.receive(datagramPacket)", e);
@@ -382,9 +383,10 @@ public class UdpService implements SocketService {
                     try {
                         Log.d(TAG, "run: datagramSocket.receive(datagramPacket)");
                         datagramSocket.receive(datagramPacket);
-                        mReceiveMessageListener.onReceived(new String(datagramPacket.getData()));
+                        String msg = new String(datagramPacket.getData(), 0, datagramPacket.getLength());
+                        mReceiveMessageListener.onReceived(msg);
                         Log.d("UDP Demo", datagramPacket.getAddress().getHostAddress()
-                                + ":" + new String(datagramPacket.getData()));
+                                + ":" + msg);
                     } catch (IOException e) {
                         e.printStackTrace();
                         Log.e(TAG, "datagramSocket.receive(datagramPacket)", e);
