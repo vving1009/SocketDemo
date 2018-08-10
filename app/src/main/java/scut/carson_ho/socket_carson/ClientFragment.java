@@ -67,7 +67,7 @@ public class ClientFragment extends Fragment {
                 }
             }
         };
-        mSocketService = new UdpService(getContext());
+        mSocketService = new TcpService(getContext());
         mSocketService.setReceiveMessageListener(message -> {
             Log.d(TAG, "setReceiveMessageListener: " + message);
             getActivity().runOnUiThread(() -> receiveMessage.setText(message));
@@ -134,8 +134,8 @@ public class ClientFragment extends Fragment {
                 }
             }
         });*/
-        //mSocketService.connect(ip.getText().toString(), PORT);
-        mSocketService.start();
+        mSocketService.connect(ip.getText().toString(), PORT);  //tcp
+        //mSocketService.start();  //udp
     }
 
     @OnClick(R.id.disconnect)
@@ -178,9 +178,9 @@ public class ClientFragment extends Fragment {
 
         });*/
         try {
-            //mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"), null);
-            //mSocketService.write((edit.getText().toString() + "\n").getBytes("utf-8"), ip.getText().toString());
-            mSocketService.multiWrite((edit.getText().toString() + "\n").getBytes("utf-8"));
+            mSocketService.write((edit.getText().toString()).getBytes("utf-8"), null);
+            //mSocketService.write((edit.getText().toString()).getBytes("utf-8"), ip.getText().toString());  //udp
+            //mSocketService.multiWrite((edit.getText().toString()).getBytes("utf-8"));  //udp broadcast
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
